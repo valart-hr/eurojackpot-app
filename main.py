@@ -167,61 +167,32 @@ def fetch_year_page(year: int) -> str:
 def parse_draws_from_html(html: str):
     soup = BeautifulSoup(html, "html.parser")
     text = soup.get_text("\n", strip=True)
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    pattern = re.compile(
+        r"(?m)^"
+        r"(\d{1,2}\s+[A-Z][a-z]{2}\s+\d{4})"      # 31 Dec 2024
+        r"\s+\d{2}/\d{2}/\d{4}\s+(?:Tue|Fri)\s*$" # 31/12/2024 Tue
+        r"\n+"
+        r"(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})"
+        r"\s+EURO NUMBERS\s+"
+        r"(\d{2})\s+(\d{2})",
+        re.MULTILINE,
+    )
 
     draws = []
 
-    date_pattern = re.compile(
-        r"^(\d{1,2}\s+[A-Z][a-z]{2}\s+\d{4})\s+\d{2}/\d{2}/\d{4}\s+(Tue|Fri)$"
-    )
-    nums_pattern = re.compile(
-        r"^(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\s+EURO NUMBERS\s+(\d{2})\s+(\d{2})$"
-    )
+    for match in pattern.finditer(text):
+        draw_date = datetime.datetime.strptime(match.group(1), "%d %b %Y").date()
+        main_numbers = sorted([int(match.group(i)) for i in range(2, 7)])
+        euro_numbers = sorted([int(match.group(i)) for i in range(7, 9)])
 
-    i = 0
-    while i < len(lines):
-        date_match = date_pattern.match(lines[i])
-
-        if date_match:
-            try:
-                draw_date = datetime.datetime.strptime(date_match.group(1), "%d %b %Y").date()
-            except Exception:
-                i += 1
-                continue
-
-            # brojevi su obično u sljedećih par linija
-            found = False
-            for j in range(i + 1, min(i + 5, len(lines))):
-                nums_match = nums_pattern.match(lines[j])
-                if not nums_match:
-                    continue
-
-                main_numbers = sorted([int(nums_match.group(k)) for k in range(1, 6)])
-                euro_numbers = sorted([int(nums_match.group(k)) for k in range(6, 8)])
-
-                if (
-                    len(set(main_numbers)) == 5
-                    and len(set(euro_numbers)) == 2
-                    and all(1 <= n <= 50 for n in main_numbers)
-                    and all(1 <= e <= 12 for e in euro_numbers)
-                ):
-                    draws.append({
-                        "draw_date": draw_date,
-                        "main_numbers": main_numbers,
-                        "euro_numbers": euro_numbers,
-                    })
-                    found = True
-                    i = j
-                    break
-
-            if found:
-                i += 1
-                continue
-
-        i += 1
+        draws.append({
+            "draw_date": draw_date,
+            "main_numbers": main_numbers,
+            "euro_numbers": euro_numbers,
+        })
 
     return draws
-
 
 def upsert_draws(draws):
     conn = get_conn()
