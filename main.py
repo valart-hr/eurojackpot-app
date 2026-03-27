@@ -14,9 +14,7 @@ app = FastAPI()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Update jednom dnevno
 UPDATE_INTERVAL_SECONDS = 60 * 60 * 24
-
 START_YEAR = 2012
 CURRENT_YEAR = datetime.date.today().year
 
@@ -132,14 +130,6 @@ def render_layout(title: str, body: str):
                 position: sticky;
                 top: 0;
             }}
-            .badge {{
-                display: inline-block;
-                padding: 3px 8px;
-                border-radius: 999px;
-                background: #e5e7eb;
-                font-size: 12px;
-                margin-left: 6px;
-            }}
         </style>
     </head>
     <body>
@@ -165,7 +155,11 @@ def health():
 
 def fetch_year_page(year: int) -> str:
     url = f"https://www.beatlottery.co.uk/eurojackpot/draw-history/year/{year}"
-    r = requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+    r = requests.get(
+        url,
+        timeout=30,
+        headers={"User-Agent": "Mozilla/5.0"}
+    )
     r.raise_for_status()
     return r.text
 
@@ -176,38 +170,32 @@ def parse_draws_from_html(html: str):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
 
     draws = []
-    i = 0
 
-    while i < len(lines):
-        line = lines[i]
+    date_pattern = re.compile(r"^\d{1,2}\s+[A-Z][a-z]{2}\s+\d{4}$")
+    nums_pattern = re.compile(
+        r"^(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\s+EURO NUMBERS\s+(\d{2})\s+(\d{2})$"
+    )
 
-        if re.match(r"^\d{1,2}\s+[A-Z][a-z]{2}\s+\d{4}$", line):
-            draw_date = datetime.datetime.strptime(line, "%d %b %Y").date()
-            joined = " ".join(lines[i:i+10])
+    for i, line in enumerate(lines):
+        if not date_pattern.match(line):
+            continue
 
-            m = re.search(
-                r"(\d{1,2})\s+(\d{1,2})\s+(\d{1,2})\s+(\d{1,2})\s+(\d{1,2}).*?(\d{1,2})\s+(\d{1,2})",
-                joined
-            )
+        draw_date = datetime.datetime.strptime(line, "%d %b %Y").date()
 
-            if m:
-                nums = [int(m.group(x)) for x in range(1, 8)]
-                main_numbers = sorted(nums[:5])
-                euro_numbers = sorted(nums[5:])
+        for j in range(i + 1, min(i + 6, len(lines))):
+            m = nums_pattern.match(lines[j])
+            if not m:
+                continue
 
-                # osnovna validacija
-                if (
-                    len(set(main_numbers)) == 5
-                    and len(set(euro_numbers)) == 2
-                    and all(1 <= n <= 50 for n in main_numbers)
-                    and all(1 <= e <= 12 for e in euro_numbers)
-                ):
-                    draws.append({
-                        "draw_date": draw_date,
-                        "main_numbers": main_numbers,
-                        "euro_numbers": euro_numbers,
-                    })
-        i += 1
+            main_numbers = sorted([int(m.group(k)) for k in range(1, 6)])
+            euro_numbers = sorted([int(m.group(k)) for k in range(6, 8)])
+
+            draws.append({
+                "draw_date": draw_date,
+                "main_numbers": main_numbers,
+                "euro_numbers": euro_numbers,
+            })
+            break
 
     return draws
 
@@ -267,6 +255,28 @@ def update_all_draws():
             print(f"Year {year} error: {e}")
 
     print(f"Update complete. Rows processed: {total}")
+
+
+@app.get("/update-now")
+def update_now():
+    try:
+        update_all_draws()
+        return {"status": "updated"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/test-parse")
+def test_parse():
+    try:
+        html = fetch_year_page(2024)
+        draws = parse_draws_from_html(html)
+        return {
+            "count": len(draws),
+            "first_5": draws[:5]
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 def get_all_draws():
@@ -378,6 +388,7 @@ def home():
         <a href="/overdue">Overdue</a>
         <a href="/hot-cold">Hot/Cold</a>
         <a href="/health">Health</a>
+        <a href="/update-now">Update now</a>
     </div>
 
     <div class="card">
@@ -517,13 +528,7 @@ def worker_loop():
             print("Update error:", e)
 
         time.sleep(UPDATE_INTERVAL_SECONDS)
-@app.get("/update-now")
-def update_now():
-    try:
-        update_all_draws()
-        return {"status": "updated"}
-    except Exception as e:
-        return {"error": str(e)}
+
 
 @app.on_event("startup")
 def startup():
