@@ -170,46 +170,52 @@ def parse_draws_from_html(html: str):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
 
     draws = []
-    date_pattern = re.compile(r"^\d{1,2}\s+[A-Z][a-z]{2}\s+\d{4}$")
+
+    date_pattern = re.compile(
+        r"^(\d{1,2}\s+[A-Z][a-z]{2}\s+\d{4})\s+\d{2}/\d{2}/\d{4}\s+(Tue|Fri)$"
+    )
+    nums_pattern = re.compile(
+        r"^(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\s+EURO NUMBERS\s+(\d{2})\s+(\d{2})$"
+    )
 
     i = 0
     while i < len(lines):
-        line = lines[i]
+        date_match = date_pattern.match(lines[i])
 
-        if date_pattern.match(line):
+        if date_match:
             try:
-                draw_date = datetime.datetime.strptime(line, "%d %b %Y").date()
+                draw_date = datetime.datetime.strptime(date_match.group(1), "%d %b %Y").date()
             except Exception:
                 i += 1
                 continue
 
+            # brojevi su obično u sljedećih par linija
             found = False
+            for j in range(i + 1, min(i + 5, len(lines))):
+                nums_match = nums_pattern.match(lines[j])
+                if not nums_match:
+                    continue
 
-            # traži u sljedećih nekoliko linija točno 7 brojeva:
-            # 5 glavnih (1-50) + 2 euro (1-12)
-            for j in range(i + 1, min(i + 8, len(lines))):
-                nums = [int(x) for x in re.findall(r"\d+", lines[j])]
+                main_numbers = sorted([int(nums_match.group(k)) for k in range(1, 6)])
+                euro_numbers = sorted([int(nums_match.group(k)) for k in range(6, 8)])
 
-                if len(nums) == 7:
-                    main = nums[:5]
-                    euro = nums[5:]
-
-                    if (
-                        len(set(main)) == 5
-                        and len(set(euro)) == 2
-                        and all(1 <= n <= 50 for n in main)
-                        and all(1 <= e <= 12 for e in euro)
-                    ):
-                        draws.append({
-                            "draw_date": draw_date,
-                            "main_numbers": sorted(main),
-                            "euro_numbers": sorted(euro),
-                        })
-                        found = True
-                        break
+                if (
+                    len(set(main_numbers)) == 5
+                    and len(set(euro_numbers)) == 2
+                    and all(1 <= n <= 50 for n in main_numbers)
+                    and all(1 <= e <= 12 for e in euro_numbers)
+                ):
+                    draws.append({
+                        "draw_date": draw_date,
+                        "main_numbers": main_numbers,
+                        "euro_numbers": euro_numbers,
+                    })
+                    found = True
+                    i = j
+                    break
 
             if found:
-                i = j + 1
+                i += 1
                 continue
 
         i += 1
