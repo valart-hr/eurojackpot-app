@@ -359,7 +359,7 @@ def compute_stats():
         "size50": size50,
         "top_pairs": top_pairs,
     }
-
+import random
 
 @app.get("/", response_class=HTMLResponse)
 def home():
@@ -528,3 +528,77 @@ def worker_loop():
 def startup():
     thread = threading.Thread(target=worker_loop, daemon=True)
     thread.start()
+    def build_predictions():
+    stats = compute_stats()
+
+    overdue_main = [x[0] for x in stats["overdue_main"][:15]]
+    hot_main = [x[0] for x in sorted(stats["main_freq"].items(), key=lambda x: (-x[1], x[0]))[:15]]
+
+    medium_main_candidates = [
+        x[0] for x in sorted(
+            stats["main_freq"].items(),
+            key=lambda x: x[1]
+        )[15:35]
+    ]
+
+    overdue_euro = [x[0] for x in stats["overdue_euro"][:6]]
+    hot_euro = [x[0] for x in sorted(stats["euro_freq"].items(), key=lambda x: (-x[1], x[0]))[:6]]
+
+    tickets = []
+    seen = set()
+
+    attempts = 0
+    while len(tickets) < 5 and attempts < 100:
+        attempts += 1
+
+        main_numbers = set()
+        euro_numbers = set()
+
+        # 2 overdue glavna
+        while len(main_numbers) < 2:
+            main_numbers.add(random.choice(overdue_main))
+
+        # 2 hot glavna
+        hot_pool = [n for n in hot_main if n not in main_numbers]
+        while len(main_numbers) < 4 and hot_pool:
+            choice = random.choice(hot_pool)
+            main_numbers.add(choice)
+            hot_pool = [n for n in hot_pool if n != choice]
+
+        # 1 srednji/random glavni
+        middle_pool = [n for n in medium_main_candidates if n not in main_numbers]
+        if middle_pool:
+            main_numbers.add(random.choice(middle_pool))
+
+        # ako slučajno nema 5, dopuni iz cijelog skupa
+        all_main = list(range(1, 51))
+        while len(main_numbers) < 5:
+            main_numbers.add(random.choice(all_main))
+
+        # euro: 1 overdue + 1 hot
+        euro_numbers.add(random.choice(overdue_euro))
+        hot_euro_pool = [n for n in hot_euro if n not in euro_numbers]
+        if hot_euro_pool:
+            euro_numbers.add(random.choice(hot_euro_pool))
+
+        while len(euro_numbers) < 2:
+            euro_numbers.add(random.randint(1, 12))
+
+        main_sorted = tuple(sorted(main_numbers))
+        euro_sorted = tuple(sorted(euro_numbers))
+
+        key = (main_sorted, euro_sorted)
+        if key in seen:
+            continue
+
+        seen.add(key)
+        tickets.append({
+            "main_numbers": list(main_sorted),
+            "euro_numbers": list(euro_sorted),
+            "profile": {
+                "main": "2 overdue + 2 hot + 1 middle",
+                "euro": "1 overdue + 1 hot"
+            }
+        })
+
+    return tickets
