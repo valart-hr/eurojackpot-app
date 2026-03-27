@@ -602,3 +602,43 @@ def startup():
         })
 
     return tickets
+@app.get("/predict")
+def predict():
+    return {
+        "note": "Ovo je statistički generator kombinacija, ne stvarno predviđanje budućeg izvlačenja.",
+        "tickets": build_predictions()
+    }
+    @app.get("/predict-view", response_class=HTMLResponse)
+def predict_view():
+    tickets = build_predictions()
+
+    cards = ""
+    for i, ticket in enumerate(tickets, start=1):
+        main_numbers = " - ".join(str(x) for x in ticket["main_numbers"])
+        euro_numbers = " - ".join(str(x) for x in ticket["euro_numbers"])
+
+        cards += f"""
+        <div class="card">
+            <div class="title">Kombinacija {i}</div>
+            <div class="row"><b>Glavni brojevi:</b> {main_numbers}</div>
+            <div class="row"><b>Euro brojevi:</b> {euro_numbers}</div>
+            <div class="row"><b>Profil:</b> {ticket['profile']['main']} / {ticket['profile']['euro']}</div>
+        </div>
+        """
+
+    body = f"""
+    <div class="header">
+        <h1>Predict</h1>
+        <div class="muted">Statistički generator kombinacija</div>
+    </div>
+
+    <div class="nav">
+        <a href="/">Početna</a>
+        <a href="/stats">Frekvencije</a>
+        <a href="/overdue">Overdue</a>
+    </div>
+
+    {cards}
+    """
+
+    return render_layout("Predict", body)
