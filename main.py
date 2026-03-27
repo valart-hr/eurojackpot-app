@@ -166,29 +166,53 @@ def fetch_year_page(year: int) -> str:
 
 def parse_draws_from_html(html: str):
     soup = BeautifulSoup(html, "html.parser")
-    text = soup.get_text(" ", strip=True)
-
-    # uzmi sve brojeve
-    numbers = list(map(int, re.findall(r"\d+", text)))
+    text = soup.get_text("\n", strip=True)
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
 
     draws = []
+    date_pattern = re.compile(r"^\d{1,2}\s+[A-Z][a-z]{2}\s+\d{4}$")
+
     i = 0
+    while i < len(lines):
+        line = lines[i]
 
-    while i + 6 < len(numbers):
-        # Eurojackpot ima 5 + 2 broja
-        main = numbers[i:i+5]
-        euro = numbers[i+5:i+7]
+        if date_pattern.match(line):
+            try:
+                draw_date = datetime.datetime.strptime(line, "%d %b %Y").date()
+            except Exception:
+                i += 1
+                continue
 
-        # filter da izbacimo smeće (datumi itd.)
-        if all(1 <= n <= 50 for n in main) and all(1 <= e <= 12 for e in euro):
-            draws.append({
-                "draw_date": datetime.date.today(),  # privremeno
-                "main_numbers": sorted(main),
-                "euro_numbers": sorted(euro)
-            })
-            i += 7
-        else:
-            i += 1
+            found = False
+
+            # traži u sljedećih nekoliko linija točno 7 brojeva:
+            # 5 glavnih (1-50) + 2 euro (1-12)
+            for j in range(i + 1, min(i + 8, len(lines))):
+                nums = [int(x) for x in re.findall(r"\d+", lines[j])]
+
+                if len(nums) == 7:
+                    main = nums[:5]
+                    euro = nums[5:]
+
+                    if (
+                        len(set(main)) == 5
+                        and len(set(euro)) == 2
+                        and all(1 <= n <= 50 for n in main)
+                        and all(1 <= e <= 12 for e in euro)
+                    ):
+                        draws.append({
+                            "draw_date": draw_date,
+                            "main_numbers": sorted(main),
+                            "euro_numbers": sorted(euro),
+                        })
+                        found = True
+                        break
+
+            if found:
+                i = j + 1
+                continue
+
+        i += 1
 
     return draws
 
