@@ -517,7 +517,13 @@ def worker_loop():
             print("Update error:", e)
 
         time.sleep(UPDATE_INTERVAL_SECONDS)
-
+@app.get("/update-now")
+def update_now():
+    try:
+        update_all_draws()
+        return {"status": "updated"}
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.on_event("startup")
 def startup():
