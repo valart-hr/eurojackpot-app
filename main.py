@@ -8,6 +8,7 @@ import re
 import datetime
 import time
 import threading
+import random
 from itertools import combinations
 
 app = FastAPI()
@@ -130,6 +131,11 @@ def render_layout(title: str, body: str):
                 position: sticky;
                 top: 0;
             }}
+            .empty {{
+                text-align: center;
+                color: #6b7280;
+                padding: 24px 10px;
+            }}
         </style>
     </head>
     <body>
@@ -170,8 +176,8 @@ def parse_draws_from_html(html: str):
 
     pattern = re.compile(
         r"(?m)^"
-        r"(\d{1,2}\s+[A-Z][a-z]{2}\s+\d{4})"      # 31 Dec 2024
-        r"\s+\d{2}/\d{2}/\d{4}\s+(?:Tue|Fri)\s*$" # 31/12/2024 Tue
+        r"(\d{1,2}\s+[A-Z][a-z]{2}\s+\d{4})"
+        r"\s+\d{2}/\d{2}/\d{4}\s+(?:Tue|Fri)\s*$"
         r"\n+"
         r"(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})"
         r"\s+EURO NUMBERS\s+"
@@ -193,6 +199,7 @@ def parse_draws_from_html(html: str):
         })
 
     return draws
+
 
 def upsert_draws(draws):
     conn = get_conn()
@@ -359,7 +366,115 @@ def compute_stats():
         "size50": size50,
         "top_pairs": top_pairs,
     }
-import random
+
+
+def build_predictions():
+    stats = compute_stats()
+
+    overdue_main = [x[0] for x in stats["overdue_main"][:15]]
+    hot_main = [x[0] for x in sorted(stats["main_freq"].items(), key=lambda x: (-x[1], x[0]))[:15]]
+    medium_main_candidates = [x[0] for x in sorted(stats["main_freq"].items(), key=lambda x: x[1])[15:35]]
+
+    overdue_euro = [x[0] for x in stats["overdue_euro"][:6]]
+    hot_euro = [x[0] for x in sorted(stats["euro_freq"].items(), key=lambda x: (-x[1], x[0]))[:6]]
+
+    tickets = []
+    seen = set()
+    attempts = 0
+
+    while len(tickets) < 5 and attempts < 100:
+        attempts += 1
+
+        main_numbers = set()
+        euro_numbers = set()
+
+        while len(main_numbers) < 2:
+            main_numbers.add(random.choice(overdue_main))
+
+        hot_pool = [n for n in hot_main if n not in main_numbers]
+        while len(main_numbers) < 4 and hot_pool:
+            choice = random.choice(hot_pool)
+            main_numbers.add(choice)
+            hot_pool = [n for n in hot_pool if n != choice]
+
+        middle_pool = [n for n in medium_main_candidates if n not in main_numbers]
+        if middle_pool:
+            main_numbers.add(random.choice(middle_pool))
+
+        while len(main_numbers) < 5:
+            main_numbers.add(random.randint(1, 50))
+
+        euro_numbers.add(random.choice(overdue_euro))
+        hot_euro_pool = [n for n in hot_euro if n not in euro_numbers]
+        if hot_euro_pool:
+            euro_numbers.add(random.choice(hot_euro_pool))
+
+        while len(euro_numbers) < 2:
+            euro_numbers.add(random.randint(1, 12))
+
+        main_sorted = tuple(sorted(main_numbers))
+        euro_sorted = tuple(sorted(euro_numbers))
+
+        key = (main_sorted, euro_sorted)
+        if key in seen:
+            continue
+
+        seen.add(key)
+        tickets.append({
+            "main_numbers": list(main_sorted),
+            "euro_numbers": list(euro_sorted),
+            "profile": {
+                "main": "2 overdue + 2 hot + 1 middle",
+                "euro": "1 overdue + 1 hot"
+            }
+        })
+
+    return tickets
+
+
+@app.get("/predict")
+def predict():
+    return {
+        "note": "Ovo je statistički generator kombinacija, ne stvarno predviđanje budućeg izvlačenja.",
+        "tickets": build_predictions()
+    }
+
+
+@app.get("/predict-view", response_class=HTMLResponse)
+def predict_view():
+    tickets = build_predictions()
+
+    cards = ""
+    for i, ticket in enumerate(tickets, start=1):
+        main_numbers = " - ".join(str(x) for x in ticket["main_numbers"])
+        euro_numbers = " - ".join(str(x) for x in ticket["euro_numbers"])
+
+        cards += f"""
+        <div class="card">
+            <div class="title">Kombinacija {i}</div>
+            <div class="row"><b>Glavni brojevi:</b> {main_numbers}</div>
+            <div class="row"><b>Euro brojevi:</b> {euro_numbers}</div>
+            <div class="row"><b>Profil:</b> {ticket['profile']['main']} / {ticket['profile']['euro']}</div>
+        </div>
+        """
+
+    body = f"""
+    <div class="header">
+        <h1>Predict</h1>
+        <div class="muted">Statistički generator kombinacija</div>
+    </div>
+
+    <div class="nav">
+        <a href="/">Početna</a>
+        <a href="/stats">Frekvencije</a>
+        <a href="/overdue">Overdue</a>
+    </div>
+
+    {cards}
+    """
+
+    return render_layout("Predict", body)
+
 
 @app.get("/", response_class=HTMLResponse)
 def home():
@@ -381,6 +496,7 @@ def home():
         <a href="/stats">Frekvencije</a>
         <a href="/overdue">Overdue</a>
         <a href="/hot-cold">Hot/Cold</a>
+        <a href="/predict-view">Predict</a>
         <a href="/health">Health</a>
         <a href="/update-now">Update now</a>
     </div>
@@ -528,117 +644,3 @@ def worker_loop():
 def startup():
     thread = threading.Thread(target=worker_loop, daemon=True)
     thread.start()
-    def build_predictions():
-    stats = compute_stats()
-
-    overdue_main = [x[0] for x in stats["overdue_main"][:15]]
-    hot_main = [x[0] for x in sorted(stats["main_freq"].items(), key=lambda x: (-x[1], x[0]))[:15]]
-
-    medium_main_candidates = [
-        x[0] for x in sorted(
-            stats["main_freq"].items(),
-            key=lambda x: x[1]
-        )[15:35]
-    ]
-
-    overdue_euro = [x[0] for x in stats["overdue_euro"][:6]]
-    hot_euro = [x[0] for x in sorted(stats["euro_freq"].items(), key=lambda x: (-x[1], x[0]))[:6]]
-
-    tickets = []
-    seen = set()
-
-    attempts = 0
-    while len(tickets) < 5 and attempts < 100:
-        attempts += 1
-
-        main_numbers = set()
-        euro_numbers = set()
-
-        # 2 overdue glavna
-        while len(main_numbers) < 2:
-            main_numbers.add(random.choice(overdue_main))
-
-        # 2 hot glavna
-        hot_pool = [n for n in hot_main if n not in main_numbers]
-        while len(main_numbers) < 4 and hot_pool:
-            choice = random.choice(hot_pool)
-            main_numbers.add(choice)
-            hot_pool = [n for n in hot_pool if n != choice]
-
-        # 1 srednji/random glavni
-        middle_pool = [n for n in medium_main_candidates if n not in main_numbers]
-        if middle_pool:
-            main_numbers.add(random.choice(middle_pool))
-
-        # ako slučajno nema 5, dopuni iz cijelog skupa
-        all_main = list(range(1, 51))
-        while len(main_numbers) < 5:
-            main_numbers.add(random.choice(all_main))
-
-        # euro: 1 overdue + 1 hot
-        euro_numbers.add(random.choice(overdue_euro))
-        hot_euro_pool = [n for n in hot_euro if n not in euro_numbers]
-        if hot_euro_pool:
-            euro_numbers.add(random.choice(hot_euro_pool))
-
-        while len(euro_numbers) < 2:
-            euro_numbers.add(random.randint(1, 12))
-
-        main_sorted = tuple(sorted(main_numbers))
-        euro_sorted = tuple(sorted(euro_numbers))
-
-        key = (main_sorted, euro_sorted)
-        if key in seen:
-            continue
-
-        seen.add(key)
-        tickets.append({
-            "main_numbers": list(main_sorted),
-            "euro_numbers": list(euro_sorted),
-            "profile": {
-                "main": "2 overdue + 2 hot + 1 middle",
-                "euro": "1 overdue + 1 hot"
-            }
-        })
-
-    return tickets
-@app.get("/predict")
-def predict():
-    return {
-        "note": "Ovo je statistički generator kombinacija, ne stvarno predviđanje budućeg izvlačenja.",
-        "tickets": build_predictions()
-    }
-    @app.get("/predict-view", response_class=HTMLResponse)
-def predict_view():
-    tickets = build_predictions()
-
-    cards = ""
-    for i, ticket in enumerate(tickets, start=1):
-        main_numbers = " - ".join(str(x) for x in ticket["main_numbers"])
-        euro_numbers = " - ".join(str(x) for x in ticket["euro_numbers"])
-
-        cards += f"""
-        <div class="card">
-            <div class="title">Kombinacija {i}</div>
-            <div class="row"><b>Glavni brojevi:</b> {main_numbers}</div>
-            <div class="row"><b>Euro brojevi:</b> {euro_numbers}</div>
-            <div class="row"><b>Profil:</b> {ticket['profile']['main']} / {ticket['profile']['euro']}</div>
-        </div>
-        """
-
-    body = f"""
-    <div class="header">
-        <h1>Predict</h1>
-        <div class="muted">Statistički generator kombinacija</div>
-    </div>
-
-    <div class="nav">
-        <a href="/">Početna</a>
-        <a href="/stats">Frekvencije</a>
-        <a href="/overdue">Overdue</a>
-    </div>
-
-    {cards}
-    """
-
-    return render_layout("Predict", body)
