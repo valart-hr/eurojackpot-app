@@ -166,36 +166,29 @@ def fetch_year_page(year: int) -> str:
 
 def parse_draws_from_html(html: str):
     soup = BeautifulSoup(html, "html.parser")
-    text = soup.get_text("\n", strip=True)
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    text = soup.get_text(" ", strip=True)
+
+    # uzmi sve brojeve
+    numbers = list(map(int, re.findall(r"\d+", text)))
 
     draws = []
+    i = 0
 
-    date_pattern = re.compile(r"^\d{1,2}\s+[A-Z][a-z]{2}\s+\d{4}$")
-    nums_pattern = re.compile(
-        r"^(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\s+EURO NUMBERS\s+(\d{2})\s+(\d{2})$"
-    )
+    while i + 6 < len(numbers):
+        # Eurojackpot ima 5 + 2 broja
+        main = numbers[i:i+5]
+        euro = numbers[i+5:i+7]
 
-    for i, line in enumerate(lines):
-        if not date_pattern.match(line):
-            continue
-
-        draw_date = datetime.datetime.strptime(line, "%d %b %Y").date()
-
-        for j in range(i + 1, min(i + 6, len(lines))):
-            m = nums_pattern.match(lines[j])
-            if not m:
-                continue
-
-            main_numbers = sorted([int(m.group(k)) for k in range(1, 6)])
-            euro_numbers = sorted([int(m.group(k)) for k in range(6, 8)])
-
+        # filter da izbacimo smeće (datumi itd.)
+        if all(1 <= n <= 50 for n in main) and all(1 <= e <= 12 for e in euro):
             draws.append({
-                "draw_date": draw_date,
-                "main_numbers": main_numbers,
-                "euro_numbers": euro_numbers,
+                "draw_date": datetime.date.today(),  # privremeno
+                "main_numbers": sorted(main),
+                "euro_numbers": sorted(euro)
             })
-            break
+            i += 7
+        else:
+            i += 1
 
     return draws
 
